@@ -194,9 +194,9 @@ def printTrace(trace, args):
 def taintGraph(args, graph, depth=1):
 	print("  "*(args.depth-depth) +"[DEPTH " + str(args.depth-depth+1)+"] - Taint network: "  , end="")
 	#parse taint table
-	address = args.sendingBTCAddr
+	address = args.receivingBTCAddr
 	if (args.reverse):
-		address = args.receivingBTCAddr
+		address = args.sendingBTCAddr
 	parsedTable = parseTaintTable(address, address, shift="  "*(args.depth-depth), wait=args.wait, reverse=args.reverse)
 	
 	if not graph.nodeExists(address):
@@ -223,7 +223,7 @@ def taintGraph(args, graph, depth=1):
 		#recursive call
 		if (depth-1 > 0):	
 			args.receivingBTCAddr=nextAddr
-			args.sendingingBTCAddr=nextAddr
+			args.sendingBTCAddr=nextAddr
 			taintGraph(args, graph, depth-1)
 	
 
