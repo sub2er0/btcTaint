@@ -58,7 +58,13 @@ def parseTaintTable(sourceAddr, targetAddr, shift="", wait=3, reverse=False):
 		urlToOpen=BLOCKCHAINTAINT_BASE_URL + sourceAddr + "?reversed=true"
 	print (shift+urlToOpen, end="")
 	time.sleep(wait) #delay to avoid HTTP 429
-	r = urllib.request.urlopen(urlToOpen)
+	try:
+		r = urllib.request.urlopen(urlToOpen)
+	except Exception:
+		#try again after longer delay
+		print ("\nHttp request failed. Trying again in " + str(wait+5) + " seconds...")
+		time.sleep(wait+5)
+		r = urllib.request.urlopen(urlToOpen)
 	#r = open('taintTest.html')
 	soup = BeautifulSoup(r.read(), "lxml", parse_only=tableParsingFilter)
 	#print (soup.div)
@@ -98,7 +104,7 @@ def hex_to_rgb(value):
 	lv = len(value)
 	return tuple(int(value[i:i+int(lv/3)], 16) for i in range(0, lv, int(lv/3)))
 	
-def analyzeTaint(sourceAddr, targetAddr, reverse=False, depth=1, MAX_DEPTH=-1, verbose=False, wait=3):	
+def analyzeTaint(sourceAddr, targetAddr, reverse=False, depth=1, MAX_DEPTH=-1, verbose=False, wait=3, limit=-1.0):	
 	
 	if depth == 1:
 		if not reverse:
@@ -112,18 +118,16 @@ def analyzeTaint(sourceAddr, targetAddr, reverse=False, depth=1, MAX_DEPTH=-1, v
 	taintRegistry = {}
 	for row in parsedTable:
 		#print (row)
-		
-		record=taintRecord(parseBranch(row[0])[0], parseBranch(row[0])[1], parseGenericText(row[2]), parseGenericText(row[3]))
-		
-		#record = {}
-		#record['branch'] = parseBranch(row[0] )
-		#record['taintPercentage']=parseGenericText(row[2])
-		#record['count'] =  parseGenericText(row[3])
-		taintRegistry[parseBtcAddress(row[1])] = record
+		taintPercentage = parseGenericText(row[2])
+		#print("Filter :" + str(float(taintPercentage[:-1])), end="")
+		#filter by limit
+		if (float(taintPercentage[:-1])>limit):
+			#print()
+			record=taintRecord(parseBranch(row[0])[0], parseBranch(row[0])[1], parseGenericText(row[2]), parseGenericText(row[3]))
+			taintRegistry[parseBtcAddress(row[1])] = record
+		#else:
+		#	print(" skipped")
 	sortedTR = sorted(taintRegistry.items(), key=operator.itemgetter(1), reverse=True)
-	#if args.verbose:
-	#for r in sortedTR:
-	#	print (r)
 				
 	if verbose:
 		print ('Searching at level ' + str(depth)+'...', end='')
@@ -171,7 +175,7 @@ def analyzeTaint(sourceAddr, targetAddr, reverse=False, depth=1, MAX_DEPTH=-1, v
 				print(" (reverse taint)")
 			else:
 				print()
-		if analyzeTaint(nextSource, nextTarget, reverse, depth+1, MAX_DEPTH, verbose, wait):
+		if analyzeTaint(nextSource, nextTarget, reverse, depth+1, MAX_DEPTH, verbose, wait, limit):
 			return True
 		
 def printTrace(trace, args):
@@ -205,6 +209,12 @@ def taintGraph(args, graph, depth=1):
 	print ("  Nodes found: " + str(len(parsedTable)))
 	for row in parsedTable:
 		record=taintRecord(parseBranch(row[0])[0], parseBranch(row[0])[1], parseGenericText(row[2]), parseGenericText(row[3]))
+		#filter by limit
+		#print("Filter :" + str(record.taintPercentage), end="")
+		if (record.taintPercentage<=args.limit):
+		#	print (" skipped")
+			continue	#skip record
+		
 		nodeColor = hex_to_rgb(record.branchColorCode)
 		nextAddr = parseBtcAddress(row[1])
 		####version with custom size
@@ -234,11 +244,12 @@ def main():
 	argparser = argparse.ArgumentParser(description='Taint analysis between Bitcoin addresses')
 	argparser.add_argument('sendingBTCAddr',help='Source Bitcoin address', type=BTCAddress)
 	argparser.add_argument('receivingBTCAddr', help='Destination Bitcoin address', type=BTCAddress)
-	argparser.add_argument("-r", "--reverse", help="Reverse tain analysis (forward analysis)", action="store_true")
+	argparser.add_argument("-r", "--reverse", help="Reverse taint analysis (forward analysis)", action="store_true")
+	argparser.add_argument("-l", "--limit", help="Taint percentage limit. Filter out taint relationships with taint percentage lower than limit", type=float, default=-1.0)
 	argparser.add_argument("-d", "--depth", type=int, default=1, help="Max length of indirect link between addresses (default 1 = direct link)")
 	argparser.add_argument("-v", "--verbose", help="Show parsing details", action="store_true")
 	argparser.add_argument("-w", "--wait", help="Delay in seconds between URL requests", type=int, default=3)
-	argparser.add_argument("-g", "--graph", help="Export taint graph in GEXF format to the specified file. This command is alternative to standard analysis and only requires the destination address and a depth.", type=str)
+	argparser.add_argument("-g", "--graph", help="Export taint graph in GEXF format to the specified file. This command is alternative to standard analysis and only looks for the source (if -r flag is used) or destination address and a depth.", type=str)
 	args = argparser.parse_args()
 	if (args.graph):	#graph mode
 		print ("\n###### Generating taint graph ######") 
@@ -260,7 +271,7 @@ def main():
 		output_file=open(args.graph,"wb")
 		g.write(output_file)
 	else:	#standard taint analysis
-		if analyzeTaint(args.sendingBTCAddr, args.receivingBTCAddr, args.reverse, 1, args.depth, args.verbose, args.wait):
+		if analyzeTaint(args.sendingBTCAddr, args.receivingBTCAddr, args.reverse, 1, args.depth, args.verbose, args.wait, args.limit):
 			printTrace(trace, args)
 		
 	
